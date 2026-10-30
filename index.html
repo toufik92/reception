@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Reception scanner</title>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<style>
+  :root { --ink:#1d2a14; --paper:#f6f8f1; --moss:#3f6a1c; --line:#d9e0cf; --ok:#2f8a2f; --dup:#c98a12; --bad:#c23a2b; --off:#3b3f45; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; background:var(--paper); color:var(--ink); font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif; }
+  .hidden { display:none !important; }
+  button,.btn { font:inherit; font-weight:600; border:0; border-radius:14px; padding:16px; width:100%; background:var(--moss); color:#fff; display:block; text-align:center; cursor:pointer; }
+  .ghost { background:#fff; color:var(--ink); border:2px solid var(--line); }
+  input { font:inherit; font-size:18px; width:100%; padding:14px; border:2px solid var(--line); border-radius:12px; background:#fff; color:var(--ink); }
+  label { display:block; font-weight:600; margin:16px 0 6px; }
+  #login { max-width:420px; margin:0 auto; padding:32px 20px; }
+  #login h1 { font-size:28px; margin:0 0 4px; }
+  .sub { color:#5b6650; margin:0 0 16px; }
+  .msg { color:var(--bad); min-height:22px; font-weight:600; }
+  #app { max-width:520px; margin:0 auto; padding:12px 14px 24px; }
+  header { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:4px 2px 12px; }
+  .count { font-size:15px; } .count b { font-size:26px; }
+  .desk { font-size:14px; background:#fff; border:2px solid var(--line); border-radius:999px; padding:6px 12px; }
+  .tabs { display:flex; gap:8px; margin-bottom:12px; }
+  .tabs button { padding:12px; background:#fff; color:var(--ink); border:2px solid var(--line); }
+  .tabs button.on { background:var(--ink); color:#fff; border-color:var(--ink); }
+  .viewport { position:relative; background:#000; border-radius:18px; overflow:hidden; aspect-ratio:3/4; margin-bottom:12px; }
+  video { width:100%; height:100%; object-fit:cover; display:block; }
+  .frame { position:absolute; inset:18%; border:4px solid rgba(255,255,255,.9); border-radius:18px; box-shadow:0 0 0 999px rgba(0,0,0,.25); pointer-events:none; }
+  #camMsg { position:absolute; left:16px; right:16px; bottom:16px; margin:0; color:#fff; text-align:center; font-weight:600; text-shadow:0 1px 3px #000; }
+  .row { display:flex; gap:8px; margin-top:8px; }
+  .photo { position:relative; overflow:hidden; }
+  .photo input { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+  .guest { background:#fff; border:2px solid var(--line); border-radius:14px; padding:12px; margin-bottom:8px; display:flex; gap:12px; align-items:center; }
+  .guest .who { flex:1; min-width:0; }
+  .guest .nm { font-weight:700; } .guest .meta { font-size:14px; color:#5b6650; overflow-wrap:anywhere; }
+  .guest button { width:auto; padding:12px 14px; }
+  .guest .done { font-size:14px; font-weight:700; color:var(--dup); white-space:nowrap; }
+  #result { position:fixed; inset:0; z-index:10; display:flex; flex-direction:column; justify-content:center; padding:32px 24px; color:#fff; text-align:center; }
+  #result.ok { background:var(--ok); } #result.duplicate { background:var(--dup); } #result.bad { background:var(--bad); } #result.off { background:var(--off); } #result.wait { background:var(--ink); }
+  #rTitle { font-size:34px; font-weight:800; margin-bottom:12px; }
+  #rName { font-size:28px; font-weight:700; overflow-wrap:anywhere; }
+  #rMeta { font-size:18px; margin-top:8px; opacity:.95; overflow-wrap:anywhere; }
+  #rNext { margin-top:32px; background:#fff; color:var(--ink); }
+  .foot { margin-top:16px; }
+</style>
+</head>
+<body>
+
+<div id="login">
+  <h1 id="evName">Guest Reception</h1>
+  <p class="sub">Reception scanner</p>
+  <label for="pin">Staff PIN</label>
+  <input id="pin" type="password" inputmode="numeric" autocomplete="off">
+  <label for="desk">Desk name</label>
+  <input id="desk" placeholder="Desk A" maxlength="24">
+  <p class="msg" id="loginMsg"></p>
+  <button id="loginBtn" type="button">Start reception</button>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <div class="count"><b id="present">0</b> / <span id="total">0</span> checked in</div>
+    <span class="desk" id="deskLabel"></span>
+  </header>
+  <div class="tabs">
+    <button type="button" class="on" data-tab="scanTab">Scan</button>
+    <button type="button" data-tab="findTab">Find guest</button>
+  </div>
+
+  <section id="scanTab">
+    <div class="viewport">
+      <video id="video" playsinline muted autoplay></video>
+      <div class="frame"></div>
+      <p id="camMsg">Starting camera…</p>
+    </div>
+    <button id="camBtn" type="button" class="hidden">Start camera</button>
+    <div class="row">
+      <label class="btn ghost photo" style="margin:0">Take photo of QR
+        <input id="photo" type="file" accept="image/*" capture="environment">
+      </label>
+    </div>
+  </section>
+
+  <section id="findTab" class="hidden">
+    <input id="q" type="search" placeholder="Name, organization or G-0001" autocomplete="off">
+    <p class="sub" style="margin-top:8px">Check the guest's identity before a manual check-in.</p>
+    <div id="results"></div>
+  </section>
+
+  <div class="foot"><button id="lockBtn" type="button" class="ghost">Lock this phone</button></div>
+</div>
+
+<div id="result" class="hidden">
+  <div id="rTitle"></div>
+  <div id="rName"></div>
+  <div id="rMeta"></div>
+  <button id="rNext" type="button">Next guest</button>
+</div>
+
+<canvas id="canvas" class="hidden"></canvas>
+
+<script>
+(function () {
+  var S = { pin: '', desk: '', busy: false, lastCode: '', lastAt: 0, stream: null, timer: null, audio: null, wake: null, searchSeq: 0, autoClose: null };
+  var $ = function (id) { return document.getElementById(id); };
+  var store = {
+    get: function (k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } },
+    set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+    del: function (k) { try { localStorage.removeItem(k); } catch (e) {} }
+  };
+
+  // ▼▼▼ PASTE YOUR WEB APP URL (ends with /exec) BETWEEN THE QUOTES ▼▼▼
+  var API_URL = 'https://script.google.com/macros/s/AKfycbxrx1fMEaHPyULEq5yV2cNpLNSJXDVGKnrMNQXX2q1MKhhlXwsHwAZGsBNMrWwa8SF95g/exec';
+  // ▲▲▲
+
+  function call(fn) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    if (!/^https:\/\/script\.google\.com\/.+\/exec$/.test(API_URL)) return Promise.reject(new Error('NO_API'));
+    var ctrl = window.AbortController ? new AbortController() : null;
+    var t = setTimeout(function () { if (ctrl) ctrl.abort(); }, 20000);
+    return fetch(API_URL, { method: 'POST', redirect: 'follow', body: JSON.stringify({ fn: fn, args: args }), signal: ctrl ? ctrl.signal : undefined })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (j) { clearTimeout(t); if (j && j.error) throw new Error(j.error); return j ? j.result : null; },
+            function (e) { clearTimeout(t); throw e; });
+  }
+  function errText(e) {
+    var m = (e && e.message) || String(e);
+    if (m.indexOf('BAD_PIN') !== -1) return 'Wrong PIN.';
+    if (m.indexOf('LOCKED') !== -1) return 'Too many wrong PINs. Wait 10 minutes.';
+    if (m.indexOf('NO_PIN') !== -1) return 'No staff PIN set yet. Ask the organiser.';
+    if (m.indexOf('NO_API') !== -1) return 'Scanner not connected: paste the web app URL into index.html.';
+    return 'No connection to the guest list. Try again.';
+  }
+  function isAuthError(e) { var m = (e && e.message) || ''; return /BAD_PIN|LOCKED|NO_PIN/.test(m); }
+
+  /* ---------- feedback ---------- */
+  function unlockAudio() {
+    try { if (!S.audio) S.audio = new (window.AudioContext || window.webkitAudioContext)(); if (S.audio.state === 'suspended') S.audio.resume(); } catch (e) {}
+  }
+  function beep(freq, ms, delay) {
+    if (!S.audio) return;
+    try {
+      var o = S.audio.createOscillator(), g = S.audio.createGain(), t0 = S.audio.currentTime + (delay || 0);
+      o.frequency.value = freq; o.connect(g); g.connect(S.audio.destination);
+      g.gain.setValueAtTime(0.25, t0); g.gain.exponentialRampToValueAtTime(0.001, t0 + ms / 1000);
+      o.start(t0); o.stop(t0 + ms / 1000);
+    } catch (e) {}
+  }
+  function buzz(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) {} }
+  function keepAwake() {
+    try { if ('wakeLock' in navigator) navigator.wakeLock.request('screen').then(function (w) { S.wake = w; }).catch(function () {}); } catch (e) {}
+  }
+
+  /* ---------- login ---------- */
+  $('desk').value = store.get('desk');
+  $('pin').value = store.get('pin');
+  $('loginBtn').addEventListener('click', login);
+  $('pin').addEventListener('keydown', function (e) { if (e.key === 'Enter') login(); });
+
+  function login() {
+    unlockAudio();
+    var pin = $('pin').value.trim(), desk = $('desk').value.trim() || 'Desk A';
+    if (!pin) { $('loginMsg').textContent = 'Enter the staff PIN.'; return; }
+    $('loginBtn').disabled = true; $('loginMsg').textContent = '';
+    call('apiLogin', pin).then(function (stats) {
+      S.pin = pin; S.desk = desk;
+      if (stats && stats.eventName) { $('evName').textContent = stats.eventName; document.title = 'Reception · ' + stats.eventName; }
+      store.set('pin', pin); store.set('desk', desk);
+      $('deskLabel').textContent = desk;
+      $('login').classList.add('hidden'); $('app').classList.remove('hidden');
+      updateStats(stats); keepAwake(); startCamera();
+      setInterval(refreshStats, 30000);
+    }).catch(function (e) { $('loginMsg').textContent = errText(e); })
+      .then(function () { $('loginBtn').disabled = false; });
+  }
+  $('lockBtn').addEventListener('click', function () { store.del('pin'); location.reload(); });
+
+  function updateStats(s) { if (!s) return; $('present').textContent = s.present; $('total').textContent = s.total; }
+  function refreshStats() { if (S.pin && !document.hidden) call('apiStats', S.pin).then(updateStats).catch(function () {}); }
+
+  /* ---------- tabs ---------- */
+  Array.prototype.forEach.call(document.querySelectorAll('.tabs button'), function (b) {
+    b.addEventListener('click', function () {
+      Array.prototype.forEach.call(document.querySelectorAll('.tabs button'), function (x) { x.classList.toggle('on', x === b); });
+      $('scanTab').classList.toggle('hidden', b.dataset.tab !== 'scanTab');
+      $('findTab').classList.toggle('hidden', b.dataset.tab !== 'findTab');
+      if (b.dataset.tab === 'findTab') $('q').focus();
+    });
+  });
+
+  /* ---------- live camera ---------- */
+  function camFail(msg) {
+    stopCamera();
+    $('camMsg').textContent = msg;
+    $('camBtn').classList.remove('hidden');
+  }
+  function stopCamera() {
+    clearTimeout(S.timer);
+    if (S.stream) S.stream.getTracks().forEach(function (t) { t.stop(); });
+    S.stream = null;
+  }
+  function startCamera() {
+    if (typeof jsQR !== 'function') return camFail('Scanner failed to load. Check signal and reload the page.');
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return camFail('Live camera not available here. Use “Take photo of QR”.');
+    $('camMsg').textContent = 'Starting camera…';
+    navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } })
+      .then(function (stream) {
+        S.stream = stream;
+        stream.getVideoTracks().forEach(function (t) { t.addEventListener('ended', function () { camFail('Camera stopped. Tap Start camera.'); }); });
+        var v = $('video'); v.srcObject = stream; v.muted = true; v.setAttribute('playsinline', '');
+        return v.play();
+      })
+      .then(function () { $('camBtn').classList.add('hidden'); $('camMsg').textContent = 'Point at the guest’s QR code'; tick(); })
+      .catch(function (e) { camFail('Live camera blocked (' + (e && e.name || 'error') + '). Use “Take photo of QR”, or allow the camera in browser settings.'); });
+  }
+  $('camBtn').addEventListener('click', function () { unlockAudio(); startCamera(); });
+
+  var canvas = $('canvas'), ctx2d = canvas.getContext('2d', { willReadFrequently: true });
+  var detector = null, frameNo = 0, detecting = false;
+  try {
+    if ('BarcodeDetector' in window) {
+      window.BarcodeDetector.getSupportedFormats().then(function (f) {
+        if (f.indexOf('qr_code') !== -1) detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+      }).catch(function () {});
+    }
+  } catch (e) {}
+
+  // Read one region of an image/video, scaled so its longest side is `target` px.
+  function readRegion(src, sx, sy, sw, sh, target, both) {
+    var scale = target / Math.max(sw, sh);
+    var w = Math.max(1, Math.round(sw * scale)), h = Math.max(1, Math.round(sh * scale));
+    canvas.width = w; canvas.height = h;
+    ctx2d.imageSmoothingEnabled = true;
+    ctx2d.drawImage(src, sx, sy, sw, sh, 0, 0, w, h);
+    var img = ctx2d.getImageData(0, 0, w, h);
+    var code = jsQR(img.data, w, h, { inversionAttempts: both ? 'attemptBoth' : 'dontInvert' });
+    return code && code.data ? code.data : '';
+  }
+
+  // Photos: try several sizes and centre crops. Downscaling also removes screen stripes (moiré).
+  function readPhoto(img) {
+    var W = img.naturalWidth, H = img.naturalHeight, tries = [];
+    [1000, 1600, 700, 500].forEach(function (t) { tries.push([0, 0, W, H, t]); });
+    [0.6, 0.4].forEach(function (f) {
+      var sw = W * f, sh = H * f;
+      [900, 600].forEach(function (t) { tries.push([(W - sw) / 2, (H - sh) / 2, sw, sh, t]); });
+    });
+    for (var i = 0; i < tries.length; i++) {
+      var d = readRegion(img, tries[i][0], tries[i][1], tries[i][2], tries[i][3], tries[i][4], true);
+      if (d) return d;
+    }
+    return '';
+  }
+
+  function tick() {
+    if (!S.stream) return;
+    var v = $('video');
+    var ready = !S.busy && !$('scanTab').classList.contains('hidden') && v.readyState >= 2 && v.videoWidth;
+    if (ready && detector && !detecting) {
+      detecting = true;
+      detector.detect(v).then(function (codes) {
+        detecting = false;
+        if (codes && codes.length && codes[0].rawValue && !S.busy) onCode(codes[0].rawValue);
+      }).catch(function () { detecting = false; detector = null; });
+    } else if (ready && !detector) {
+      try {
+        var W = v.videoWidth, H = v.videoHeight, data;
+        frameNo++;
+        if (frameNo % 2) data = readRegion(v, 0, 0, W, H, 640, false);
+        else { var cw = W * 0.6, ch = H * 0.6; data = readRegion(v, (W - cw) / 2, (H - ch) / 2, cw, ch, 640, false); }
+        if (data) onCode(data);
+      } catch (e) {}
+    }
+    S.timer = setTimeout(tick, 110);
+  }
+  function onCode(data) {
+    var now = Date.now();
+    if (data === S.lastCode && now - S.lastAt < 4000) return;
+    S.lastCode = data; S.lastAt = now;
+    submit('apiCheckIn', data);
+  }
+
+  /* ---------- photo fallback (works on every iPhone and Android) ---------- */
+  $('photo').addEventListener('change', function (e) {
+    var input = e.target, f = input.files && input.files[0];
+    if (!f) return;
+    unlockAudio();
+    S.busy = true;
+    show({ status: 'reading' });
+    var url = URL.createObjectURL(f), img = new Image();
+    img.onload = function () {
+      setTimeout(function () {
+        var finish = function (data) {
+          URL.revokeObjectURL(url); input.value = '';
+          if (data) submit('apiCheckIn', data);
+          else { S.busy = false; show({ status: 'unreadable' }); }
+        };
+        var viaJsQR = function () { var d = ''; try { d = readPhoto(img); } catch (err) {} finish(d); };
+        if (detector) {
+          detector.detect(img).then(function (c) { if (c && c.length && c[0].rawValue) finish(c[0].rawValue); else viaJsQR(); }).catch(viaJsQR);
+        } else viaJsQR();
+      }, 30);
+    };
+    img.onerror = function () { URL.revokeObjectURL(url); input.value = ''; S.busy = false; show({ status: 'unreadable' }); };
+    img.src = url;
+  });
+
+  /* ---------- check-in ---------- */
+  function submit(fn, value) {
+    S.busy = true;
+    show({ status: 'wait' });
+    call(fn, S.pin, value, S.desk)
+      .then(show)
+      .catch(function (e) {
+        if (isAuthError(e)) { store.del('pin'); alert(errText(e)); location.reload(); return; }
+        show({ status: 'error' });
+      });
+  }
+
+  function show(r) {
+    var box = $('result'), title = '', name = '', meta = '', cls = 'bad', auto = 0;
+    var g = r.guest || {};
+    var who = [g.org, g.role].filter(Boolean).join(' · ');
+    clearTimeout(S.autoClose);
+    switch (r.status) {
+      case 'wait': cls = 'wait'; title = 'Checking…'; break;
+      case 'reading': cls = 'wait'; title = 'Reading photo…'; break;
+      case 'ok': cls = 'ok'; title = 'Welcome ✓'; name = g.name; meta = [who, g.id].filter(Boolean).join(' · '); auto = 2500; beep(880, 160); buzz(80); break;
+      case 'duplicate': cls = 'duplicate'; title = 'Already checked in'; name = g.name;
+        meta = 'At ' + (g.time || 'an earlier time') + (g.by ? ' · ' + g.by : '') + (g.id ? ' · ' + g.id : ''); beep(520, 140); beep(520, 140, 0.22); buzz([80, 80, 80]); break;
+      case 'not_found': case 'invalid': title = 'Not on the list'; meta = 'This QR is not a pass for this event. Use Find guest to check by name.'; beep(220, 450); buzz(400); break;
+      case 'unreadable': title = 'No QR found'; meta = 'Hold the phone straight on, 15 to 25 cm away, no glare. Let it focus, then take the photo.'; beep(220, 300); break;
+      case 'busy': cls = 'off'; title = 'NOT SAVED'; meta = 'The system is busy. Scan again.'; beep(220, 450); break;
+      default: cls = 'off'; title = 'NOT SAVED'; meta = 'No connection. Scan again. If it then says “Already checked in”, the first scan did save.'; beep(220, 450); buzz(400);
+    }
+    if (r.stats) updateStats(r.stats);
+    box.className = cls;
+    $('rTitle').textContent = title; $('rName').textContent = name || ''; $('rMeta').textContent = meta || '';
+    $('rNext').classList.toggle('hidden', r.status === 'wait' || r.status === 'reading');
+    $('rNext').textContent = r.status === 'ok' ? 'Next guest' : 'OK';
+    if (auto) S.autoClose = setTimeout(closeResult, auto);
+    if (r.status !== 'wait' && r.status !== 'reading' && !$('findTab').classList.contains('hidden')) runSearch();
+  }
+  function closeResult() {
+    clearTimeout(S.autoClose);
+    $('result').className = 'hidden';
+    S.lastAt = Date.now();
+    S.busy = false;
+  }
+  $('rNext').addEventListener('click', closeResult);
+
+  /* ---------- manual search ---------- */
+  var qTimer;
+  $('q').addEventListener('input', function () { clearTimeout(qTimer); qTimer = setTimeout(runSearch, 350); });
+  function runSearch() {
+    var q = $('q').value.trim(), seq = ++S.searchSeq, box = $('results');
+    if (q.length < 2) { box.textContent = ''; return; }
+    call('apiSearch', S.pin, q).then(function (list) {
+      if (seq !== S.searchSeq) return;
+      box.textContent = '';
+      if (!list.length) { var p = document.createElement('p'); p.className = 'sub'; p.textContent = 'No guest matches “' + q + '”.'; box.appendChild(p); return; }
+      list.forEach(function (g) {
+        var row = document.createElement('div'); row.className = 'guest';
+        var who = document.createElement('div'); who.className = 'who';
+        var nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = g.name;
+        var meta = document.createElement('div'); meta.className = 'meta'; meta.textContent = [g.org, g.id].filter(Boolean).join(' · ');
+        who.appendChild(nm); who.appendChild(meta); row.appendChild(who);
+        if (g.present) {
+          var d = document.createElement('span'); d.className = 'done'; d.textContent = 'In ' + (g.time || ''); row.appendChild(d);
+        } else {
+          var b = document.createElement('button'); b.type = 'button'; b.textContent = 'Check in';
+          b.addEventListener('click', function () { unlockAudio(); submit('apiCheckInById', g.id); });
+          row.appendChild(b);
+        }
+        box.appendChild(row);
+      });
+    }).catch(function (e) {
+      if (seq !== S.searchSeq) return;
+      box.textContent = '';
+      var p = document.createElement('p'); p.className = 'msg'; p.textContent = errText(e); box.appendChild(p);
+    });
+  }
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden || !S.pin) return;
+    keepAwake(); refreshStats();
+    if (!S.stream) $('camBtn').classList.remove('hidden');
+  });
+})();
+</script>
+</body>
+</html>
